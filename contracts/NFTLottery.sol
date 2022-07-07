@@ -12,7 +12,7 @@ contract NFTLottery is ERC721, ERC721Enumerable, Ownable {
     uint256 public lotteryID;
     Counters.Counter private _tokenIdCounter;
 
-    uint256 internal immutable lotteryInterval = 2 * 1 days;
+    uint256 internal immutable lotteryInterval = 2 days;
     uint256 internal ticketPrice;
     address public operatorAddress;
 
@@ -63,6 +63,7 @@ contract NFTLottery is ERC721, ERC721Enumerable, Ownable {
 
     constructor(uint256 _ticketPrice) ERC721("LotteryNFT", "lNFT") {
         ticketPrice = _ticketPrice * 1 ether;
+        _tokenIdCounter.increment(); // increment token ID to align with ticket ID
     }
 
     // Function to set the lottery operator
@@ -120,9 +121,13 @@ contract NFTLottery is ERC721, ERC721Enumerable, Ownable {
         inState(State.ACTIVE)
     {
         require(
+            block.timestamp < lotteries[lotteryID].lotteryEndTime,
+            "Lottery has already ended!"
+        );
+        require(
             ticketPrice == (msg.value / _noOfTickets),
             "Insufficient balance"
-        );
+        );     
         assignTickets(_noOfTickets);
 
         emit TicketsPurchase(msg.sender, lotteryID, _noOfTickets);
@@ -141,6 +146,7 @@ contract NFTLottery is ERC721, ERC721Enumerable, Ownable {
         _lottery.amountInLottery += (_noOfTickets * ticketPrice);
     }
 
+    // get winning ticket of the lottery
     function getWinningTickets() external onlyOperator inState(State.ACTIVE) {
         require(
             block.timestamp > lotteries[lotteryID].lotteryEndTime,
@@ -152,9 +158,12 @@ contract NFTLottery is ERC721, ERC721Enumerable, Ownable {
         uint256 winningTicketID = random() % _lottery.noOfTicketsSold;
         _lottery.winningTicket = winningTicketID;
 
+        currentState = State.PAYOUT;
+
         emit LotteryNumberGenerated(lotteryID, winningTicketID);
     }
 
+    // generate a random number using lottery's numberOfTicketSold as seed
     function random() internal view returns (uint256) {
         return
             uint256(
@@ -169,6 +178,7 @@ contract NFTLottery is ERC721, ERC721Enumerable, Ownable {
         // convert hash to integer
     }
 
+    // pay lottery winner
     function payoutWinner() external onlyOperator inState(State.PAYOUT) {
         LotteryStruct storage _lottery = lotteries[lotteryID];
         _lottery.winner = payable(_lottery.ticketOwner[_lottery.winningTicket]);
@@ -185,6 +195,22 @@ contract NFTLottery is ERC721, ERC721Enumerable, Ownable {
 
         emit WinnersAwarded(_lottery.winner, reward);
     }
+
+    // check price per ticket
+    function checkTicketPrice() public view returns(uint256) {
+        return ticketPrice;
+    }
+
+    // check total funds locked in
+    function checkConractFunds() public onlyOperator view returns (uint256) {
+        return address(this).balance;
+    }
+
+    // withdraw total funds left in contract to operator
+    function withdrawContractFunds() public onlyOperator inState(State.IDLE) /* can only withdraw after paying out winner*/ payable {        
+        (bool withdraw, ) = payable(operatorAddress).call{value: address(this).balance}("");
+        require(withdraw, "Unable to withdraw funds");
+    } 
 
     //=======================================================================================//
 
